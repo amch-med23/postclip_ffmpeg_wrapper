@@ -1,4 +1,5 @@
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new/return_code.dart'; // Import ReturnCode for direct access if needed, though often not strictly required for isValueSuccess
 
 /// Converts media to: MP4, MOV, MP3, WAV, AAC, FLAC.
 /// Supports: video-to-video, audio-to-audio, and video-to-audio.
@@ -37,7 +38,8 @@ Future<bool> convertMedia({
   final session = await FFmpegKit.execute(cmd);
   final returnCode = await session.getReturnCode();
 
-  return returnCode.isValueSuccess();
+  // Handle potentially null returnCode
+  return returnCode?.isValueSuccess() ?? false;
 }
 
 bool _isVideoFile(String path) {
