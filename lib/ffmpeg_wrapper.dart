@@ -83,7 +83,7 @@ Future<bool> convertMedia({
     },
   );
 
-  final session = await FFmpegKit.executeAsync(
+  /*final session = await FFmpegKit.executeAsync(
     cmd,
     statisticsCallback: (stats) {
       if (totalDuration != null) {
@@ -92,7 +92,26 @@ Future<bool> convertMedia({
         if (onProgress != null) onProgress(ratio.clamp(0.0, 1.0));
       }
     },
+  ); */
+  final session = await FFmpegKit.executeAsync(
+    cmd,
+        (session) async {
+      // SessionCallback for the main conversion.
+      // If you need specific actions when the main conversion finishes, put them here.
+    },
+        (Log log) {
+      // LogCallback for the main conversion.
+      // You can process logs during the main conversion if needed.
+    },
+        (Statistics stats) { // This is the StatisticsCallback
+      if (totalDuration != null) {
+        final time = Duration(milliseconds: stats.getTime());
+        final ratio = time.inMilliseconds / totalDuration!.inMilliseconds;
+        if (onProgress != null) onProgress(ratio.clamp(0.0, 1.0));
+      }
+    },
   );
+
 
 
   //final session = await FFmpegKit.execute(cmd);
