@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 
@@ -39,7 +37,7 @@ Future<bool> convertMedia({
     throw UnsupportedError("Unsupported conversion from this type to $format");
   }
   // Estimate total duration
-  Duration? totalDuration;
+  /*Duration? totalDuration;
   await FFmpegKit.executeAsync(
     '-i "$inputPath"',
     completeCallback: (_) {},
@@ -55,7 +53,27 @@ Future<bool> convertMedia({
         }
       }
     },
+  ); */
+
+  Duration? totalDuration;
+  final sessionForDuration = await FFmpegKit.executeAsync(
+    '-i "$inputPath"',
+    logCallback: (log) {
+      if (log.getMessage().contains("Duration:")) {
+        final regex = RegExp(r'Duration: (\d+):(\d+):(\d+).(\d+)');
+        final match = regex.firstMatch(log.getMessage());
+        if (match != null) {
+          final h = int.parse(match.group(1)!);
+          final m = int.parse(match.group(2)!);
+          final s = int.parse(match.group(3)!);
+          totalDuration = Duration(hours: h, minutes: m, seconds: s);
+        }
+      }
+    },
+    // If executeAsync in 1.x.x doesn't accept logCallback, you might need to remove that too.
+    // Based on the FFmpegKit Flutter docs for 1.x.x, logCallback *should* be supported.
   );
+
   final session = await FFmpegKit.executeAsync(
     cmd,
     statisticsCallback: (stats) {
