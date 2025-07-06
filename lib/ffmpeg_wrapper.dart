@@ -1,5 +1,7 @@
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
+import 'package:ffmpeg_kit_flutter_new/statistics.dart';
+import 'package:ffmpeg_kit_flutter_new/log.dart';
 
 
 /// Converts media to: MP4, MOV, MP3, WAV, AAC, FLAC.
@@ -58,7 +60,12 @@ Future<bool> convertMedia({
   Duration? totalDuration;
   final sessionForDuration = await FFmpegKit.executeAsync(
     '-i "$inputPath"',
-    logCallback: (log) {
+        (session) async {
+      // This is the sessionCallback, called on completion of the session.
+      // You could technically put the duration parsing here, but it's often more
+      // reliable to rely on the logCallback which happens during execution.
+    },
+        (Log log) { // This is the LogCallback
       if (log.getMessage().contains("Duration:")) {
         final regex = RegExp(r'Duration: (\d+):(\d+):(\d+).(\d+)');
         final match = regex.firstMatch(log.getMessage());
@@ -70,8 +77,10 @@ Future<bool> convertMedia({
         }
       }
     },
-    // If executeAsync in 1.x.x doesn't accept logCallback, you might need to remove that too.
-    // Based on the FFmpegKit Flutter docs for 1.x.x, logCallback *should* be supported.
+        (Statistics statistics) {
+      // This is the StatisticsCallback, likely not relevant for simple duration estimation,
+      // but must be provided if the method signature expects it.
+    },
   );
 
   final session = await FFmpegKit.executeAsync(
