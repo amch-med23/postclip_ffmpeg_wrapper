@@ -1,8 +1,5 @@
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
-import 'package:ffmpeg_kit_flutter_new/statistics.dart';
-import 'package:ffmpeg_kit_flutter_new/log.dart';
-
 
 /// Converts media to: MP4, MOV, MP3, WAV, AAC, FLAC.
 /// Supports: video-to-video, audio-to-audio, and video-to-audio.
@@ -39,7 +36,7 @@ Future<bool> convertMedia({
     throw UnsupportedError("Unsupported conversion from this type to $format");
   }
   // Estimate total duration
-  /*Duration? totalDuration;
+  Duration? totalDuration;
   await FFmpegKit.executeAsync(
     '-i "$inputPath"',
     completeCallback: (_) {},
@@ -55,35 +52,8 @@ Future<bool> convertMedia({
         }
       }
     },
-  ); */
-
-  Duration? totalDuration;
-  final sessionForDuration = await FFmpegKit.executeAsync(
-    '-i "$inputPath"',
-        (session) async {
-      // This is the sessionCallback, called on completion of the session.
-      // You could technically put the duration parsing here, but it's often more
-      // reliable to rely on the logCallback which happens during execution.
-    },
-        (Log log) { // This is the LogCallback
-      if (log.getMessage().contains("Duration:")) {
-        final regex = RegExp(r'Duration: (\d+):(\d+):(\d+).(\d+)');
-        final match = regex.firstMatch(log.getMessage());
-        if (match != null) {
-          final h = int.parse(match.group(1)!);
-          final m = int.parse(match.group(2)!);
-          final s = int.parse(match.group(3)!);
-          totalDuration = Duration(hours: h, minutes: m, seconds: s);
-        }
-      }
-    },
-        (Statistics statistics) {
-      // This is the StatisticsCallback, likely not relevant for simple duration estimation,
-      // but must be provided if the method signature expects it.
-    },
   );
-
-  /*final session = await FFmpegKit.executeAsync(
+  final session = await FFmpegKit.executeAsync(
     cmd,
     statisticsCallback: (stats) {
       if (totalDuration != null) {
@@ -92,26 +62,7 @@ Future<bool> convertMedia({
         if (onProgress != null) onProgress(ratio.clamp(0.0, 1.0));
       }
     },
-  ); */
-  final session = await FFmpegKit.executeAsync(
-    cmd,
-        (session) async {
-      // SessionCallback for the main conversion.
-      // If you need specific actions when the main conversion finishes, put them here.
-    },
-        (Log log) {
-      // LogCallback for the main conversion.
-      // You can process logs during the main conversion if needed.
-    },
-        (Statistics stats) { // This is the StatisticsCallback
-      if (totalDuration != null) {
-        final time = Duration(milliseconds: stats.getTime());
-        final ratio = time.inMilliseconds / totalDuration!.inMilliseconds;
-        if (onProgress != null) onProgress(ratio.clamp(0.0, 1.0));
-      }
-    },
   );
-
 
 
   //final session = await FFmpegKit.execute(cmd);
