@@ -8,7 +8,7 @@ Future<bool> convertMedia({
   required String outputPath,
   required String format,
   required String quality,
-  Function(double) ? onProgress,
+ // Function(double) ? onProgress,
 }) async {
   final lowerFormat = format.toLowerCase();
   final isAudioFormat = ['mp3', 'wav', 'aac', 'flac'].contains(lowerFormat);
@@ -36,10 +36,10 @@ Future<bool> convertMedia({
     throw UnsupportedError("Unsupported conversion from this type to $format");
   }
   // Estimate total duration
-  Duration? totalDuration;
+  /*Duration? totalDuration;
   await FFmpegKit.executeAsync(
     '-i "$inputPath"',
-    completeCallback: (_) {},
+    //completeCallback: (_) {},
     logCallback: (log) {
       if (log.getMessage().contains("Duration:")) {
         final regex = RegExp(r'Duration: (\d+):(\d+):(\d+).(\d+)');
@@ -62,10 +62,10 @@ Future<bool> convertMedia({
         if (onProgress != null) onProgress(ratio.clamp(0.0, 1.0));
       }
     },
-  );
+  );*/
 
 
-  //final session = await FFmpegKit.execute(cmd);
+  final session = await FFmpegKit.execute(cmd);
   final returnCode = await session.getReturnCode();
 
   return returnCode?.isValueSuccess() ?? false;
