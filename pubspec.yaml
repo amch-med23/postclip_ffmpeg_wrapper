@@ -1,8 +1,8 @@
 name: postclip_ffmpeg_wrapper
 description: A wrapper around FfmpegKit for PostClip app.
-version: 1.0.0
+version: 1.0.1
 environment:
   sdk: ">=2.17.0 <3.0.0"
 
 dependencies:
-  ffmpeg_kit_flutter_new: ^2.0.0
+  ffmpeg_kit_flutter: 6.0.3
