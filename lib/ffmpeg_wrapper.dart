@@ -1,30 +1,27 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new/statistics.dart';
+import 'package:ffmpeg_kit_flutter_new/ffmpeg_session.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
-import 'package:ffmpeg_kit_flutter_new/session.dart';
-import 'package:ffmpeg_kit_flutter_new/session_complete_callback.dart';
-import 'package:ffmpeg_kit_flutter_new/statistics_callback.dart';
-import 'package:ffmpeg_kit_flutter_new/log_callback.dart';
+import 'package:ffmpeg_kit_flutter_new/media_information_session.dart';
+import 'package:ffmpeg_kit_flutter_new/ffprobe_kit.dart';
 
-
-/// A controller to manage FFmpeg conversion (pause not supported natively)
+/// A controller to manage FFmpeg conversion
 class FFmpegConversionController {
-  Session? _session;
+  FFmpegSession? _session;
   bool get isRunning => _session != null;
 
   /// Aborts any ongoing conversion
   Future<void> abort() async {
     final session = _session;
     if (session != null) {
-      await session.cancel();
+      await FFmpegKit.cancel(session.getSessionId());
       _session = null;
     }
   }
 }
 
 /// Converts media to: MP4, MOV, MP3, WAV, AAC, FLAC.
-/// Supports: video-to-video, audio-to-audio, and video-to-audio.
 Future<bool> convertMedia({
   required String inputPath,
   required String outputPath,
@@ -42,11 +39,10 @@ Future<bool> convertMedia({
   }
 
   final inputIsVideo = _isVideoFile(inputPath);
-  final inputIsAudio = !inputIsVideo;
 
   late String cmd;
 
-  if (inputIsAudio && isAudioFormat) {
+  if (!inputIsVideo && isAudioFormat) {
     cmd = _buildAudioCommand(inputPath, outputPath, quality, lowerFormat);
   } else if (inputIsVideo && isAudioFormat) {
     cmd = _buildVideoToAudioCommand(inputPath, outputPath, quality, lowerFormat);
@@ -56,56 +52,83 @@ Future<bool> convertMedia({
     throw UnsupportedError("Unsupported conversion from this type to $format");
   }
 
+  // Get duration for progress calculation
   Duration? totalDuration;
-  Completer<bool> completer = Completer<bool>();
+  try {
+    totalDuration = await _getMediaDuration(inputPath);
+  } catch (e) {
+    // If we can't get duration, progress won't work but conversion can still proceed
+    print("Could not determine media duration: $e");
+  }
 
-  // First, extract duration (for progress tracking)
-  await FFmpegKit.executeAsync(
-    '-i "$inputPath"',
-    logCallback: (log) {
-      final msg = log.getMessage();
-      if (msg.contains("Duration:")) {
-        final regex = RegExp(r'Duration: (\d+):(\d+):(\d+).(\d+)');
-        final match = regex.firstMatch(msg);
-        if (match != null) {
-          final h = int.parse(match.group(1)!);
-          final m = int.parse(match.group(2)!);
-          final s = int.parse(match.group(3)!);
-          totalDuration = Duration(hours: h, minutes: m, seconds: s);
-        }
-      }
+  // Start the conversion asynchronously
+  final session = await FFmpegKit.executeAsync(
+    cmd,
+    executeCallback: (session) async {
+      // This is called when the session completes
     },
   );
 
-  // Now run the real conversion
-  final session = await FFmpegKit.executeAsync(
-    cmd,
-    statisticsCallback: StatisticsCallback((Statistics stats) {
-      // progress logic
-      if (totalDuration != null && onProgress != null) {
-        final time = Duration(milliseconds: stats.getTime());
-        final ratio = time.inMilliseconds / totalDuration!.inMilliseconds;
-        onProgress(ratio.clamp(0.0, 1.0));
-      }
-    }),
-    completeCallback: SessionCompleteCallback((session) async {
-      final rc = await session.getReturnCode();
-      final success = rc?.isValueSuccess() ?? false;
-      completer.complete(success);
-    }),
-    logCallback: LogCallback((log) {
-      // log parsing logic
-      final rc = await session.getReturnCode();
-      final success = rc?.isValueSuccess() ?? false;
-      completer.complete(success);
-    }),
-  );
-
-
-  // Keep reference for abort
   controller?._session = session;
 
-  return completer.future;
+  // Poll for progress if we have a duration and callback
+  Timer? progressTimer;
+  if (totalDuration != null && onProgress != null) {
+    progressTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) async {
+      try {
+        final statistics = await session.getAllStatistics();
+        if (statistics.isNotEmpty) {
+          final lastStat = statistics.last;
+          final time = lastStat.getTime();
+          if (time > 0) {
+            final currentMs = time.toDouble();
+            final totalMs = totalDuration.inMilliseconds.toDouble();
+            final progress = (currentMs / totalMs).clamp(0.0, 1.0);
+            onProgress(progress);
+          }
+        }
+      } catch (e) {
+        // Ignore errors during progress polling
+      }
+    });
+  }
+
+  // Wait for the session to complete
+  final returnCode = await session.getReturnCode();
+
+  // Stop progress polling
+  progressTimer?.cancel();
+
+  // Final progress update
+  if (onProgress != null && ReturnCode.isSuccess(returnCode)) {
+    onProgress(1.0);
+  }
+
+  // Check if successful
+  final success = ReturnCode.isSuccess(returnCode);
+
+  return success;
+}
+
+/// Get the duration of a media file using ffprobe
+Future<Duration?> _getMediaDuration(String filePath) async {
+  try {
+    final session = await FFprobeKit.getMediaInformation(filePath);
+    final information = session.getMediaInformation();
+
+    if (information == null) return null;
+
+    final durationString = information.getDuration();
+    if (durationString == null || durationString.isEmpty) return null;
+
+    final durationSeconds = double.tryParse(durationString);
+    if (durationSeconds == null) return null;
+
+    return Duration(milliseconds: (durationSeconds * 1000).round());
+  } catch (e) {
+    print("Error getting media duration: $e");
+    return null;
+  }
 }
 
 bool _isVideoFile(String path) {
@@ -130,7 +153,7 @@ String _buildAudioCommand(String input, String output, String quality, String fo
   return '-i "$input" -c:a $codec -qscale:a $qscale "$output"';
 }
 
-String _getAudioCodec(String format) { // we need to support more formats in here as allowed by the ffmpeg library
+String _getAudioCodec(String format) {
   switch (format) {
     case 'mp3':
       return 'libmp3lame';
