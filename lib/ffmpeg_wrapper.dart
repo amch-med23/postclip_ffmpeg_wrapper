@@ -3,6 +3,7 @@ import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_session.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import 'package:ffmpeg_kit_flutter_new/ffprobe_kit.dart';
+import 'package:ffmpeg_kit_flutter_new/statistics.dart';
 
 /// A controller to manage FFmpeg conversion
 class FFmpegConversionController {
@@ -15,6 +16,7 @@ class FFmpegConversionController {
     _cancelled = true;
     final session = _session;
     if (session != null) {
+      // Use FFmpegKit.cancel() with the session ID to abort.
       await FFmpegKit.cancel(session.getSessionId());
       _session = null;
     }
@@ -60,77 +62,51 @@ Future<bool> convertMedia({
     print("Could not determine media duration: $e");
   }
 
-  // Reset cancelled flag
-  if (controller != null) {
-    controller._cancelled = false;
-  }
+  // Use Completer to handle async result
+  final completer = Completer<bool>();
 
-  // Start the conversion
-  final session = await FFmpegKit.execute(cmd);
-  controller?._session = session;
+  // Use executeAsync to get live progress updates via the StatisticsCallback
+  FFmpegKit.executeAsync(
+    cmd,
+        (session) async {
+      // This is the session complete callback
+      controller?._session = session;
+      final returnCode = await session.getReturnCode();
+      final success = ReturnCode.isSuccess(returnCode);
 
-  // Start progress polling if we have duration
-  Timer? progressTimer;
-  if (totalDuration != null && onProgress != null && controller != null) {
-    final totalMs = totalDuration.inMilliseconds.toDouble();
-
-    progressTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) async {
-      // Stop if cancelled
-      if (controller._cancelled) {
-        timer.cancel();
-        return;
+      // Final progress update
+      if (onProgress != null) {
+        onProgress(success ? 1.0 : 0.0);
       }
 
-      try {
-        final state = await session.getState();
-
-        // Check if session is still running
-        if (state.toString() == 'SessionState.completed' ||
-            state.toString() == 'SessionState.failed') {
-          timer.cancel();
-          onProgress(1.0);
-          return;
-        }
-
-        // Try to get statistics
-        final statistics = await session.getAllStatistics();
-        if (statistics.isNotEmpty) {
-          final lastStat = statistics.last;
-          final time = lastStat.getTime();
-          if (time > 0 && totalMs > 0) {
-            final currentMs = time.toDouble();
-            final progressValue = (currentMs / totalMs).clamp(0.0, 0.99);
-            onProgress(progressValue);
-          }
-        }
-      } catch (e) {
-        // Ignore polling errors
+      // Log failure reason if not successful
+      if (!success) {
+        final output = await session.getOutput();
+        print("FFmpeg conversion failed. Return code: $returnCode");
+        print("Output: $output");
       }
-    });
-  }
 
-  // Wait for completion
-  final returnCode = await session.getReturnCode();
+      // Complete the future with the success status
+      completer.complete(success);
+    },
+        (log) {
+      // Log callback - you can add logging here if needed
+    },
+        (statistics) {
+      // This is the statistics callback for live progress
+      if (onProgress != null && totalDuration != null) {
+        final totalMs = totalDuration.inMilliseconds.toDouble();
+        final currentMs = statistics.getTime();
 
-  // Stop progress polling
-  progressTimer?.cancel();
+        if (currentMs > 0 && totalMs > 0) {
+          final progressValue = (currentMs / totalMs).clamp(0.0, 1.0);
+          onProgress(progressValue);
+        }
+      }
+    },
+  );
 
-  // Final progress update
-  if (onProgress != null && ReturnCode.isSuccess(returnCode)) {
-    onProgress(1.0);
-  }
-
-  // Check if successful
-  final success = ReturnCode.isSuccess(returnCode);
-
-  // Log failure reason if not successful
-  if (!success) {
-    final output = await session.getOutput();
-    print("FFmpeg conversion failed. Return code: $returnCode");
-    print("Output: $output");
-  }
-
-  return success;
+  return completer.future;
 }
 
 /// Get the duration of a media file using ffprobe
