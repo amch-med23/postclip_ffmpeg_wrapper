@@ -2,10 +2,15 @@ import 'dart:async';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/statistics.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
+import 'package:ffmpeg_kit_flutter_new/session.dart';
+import 'package:ffmpeg_kit_flutter_new/session_complete_callback.dart';
+import 'package:ffmpeg_kit_flutter_new/statistics_callback.dart';
+import 'package:ffmpeg_kit_flutter_new/log_callback.dart';
+
 
 /// A controller to manage FFmpeg conversion (pause not supported natively)
 class FFmpegConversionController {
-  FFmpegSession? _session;
+  Session? _session;
   bool get isRunning => _session != null;
 
   /// Aborts any ongoing conversion
@@ -75,19 +80,27 @@ Future<bool> convertMedia({
   // Now run the real conversion
   final session = await FFmpegKit.executeAsync(
     cmd,
-    statisticsCallback: (Statistics stats) {
+    statisticsCallback: StatisticsCallback((Statistics stats) {
+      // progress logic
       if (totalDuration != null && onProgress != null) {
         final time = Duration(milliseconds: stats.getTime());
         final ratio = time.inMilliseconds / totalDuration!.inMilliseconds;
         onProgress(ratio.clamp(0.0, 1.0));
       }
-    },
-    completeCallback: (session) async {
+    }),
+    completeCallback: SessionCompleteCallback((session) async {
       final rc = await session.getReturnCode();
       final success = rc?.isValueSuccess() ?? false;
       completer.complete(success);
-    },
+    }),
+    logCallback: LogCallback((log) {
+      // log parsing logic
+      final rc = await session.getReturnCode();
+      final success = rc?.isValueSuccess() ?? false;
+      completer.complete(success);
+    }),
   );
+
 
   // Keep reference for abort
   controller?._session = session;
