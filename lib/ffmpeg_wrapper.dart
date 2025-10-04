@@ -1,18 +1,18 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_session.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
-import 'package:ffmpeg_kit_flutter_new/media_information_session.dart';
 import 'package:ffmpeg_kit_flutter_new/ffprobe_kit.dart';
 
 /// A controller to manage FFmpeg conversion
 class FFmpegConversionController {
   FFmpegSession? _session;
+  bool _cancelled = false;
   bool get isRunning => _session != null;
 
   /// Aborts any ongoing conversion
   Future<void> abort() async {
+    _cancelled = true;
     final session = _session;
     if (session != null) {
       await FFmpegKit.cancel(session.getSessionId());
@@ -57,38 +57,59 @@ Future<bool> convertMedia({
   try {
     totalDuration = await _getMediaDuration(inputPath);
   } catch (e) {
-    // If we can't get duration, progress won't work but conversion can still proceed
     print("Could not determine media duration: $e");
   }
 
-  // Start the conversion asynchronously
-  final session = await FFmpegKit.executeAsync(cmd);
+  // Reset cancelled flag
+  if (controller != null) {
+    controller._cancelled = false;
+  }
 
+  // Start the conversion
+  final session = await FFmpegKit.execute(cmd);
   controller?._session = session;
 
-  // Poll for progress if we have a duration and callback
+  // Start progress polling if we have duration
   Timer? progressTimer;
-  if (totalDuration != null && onProgress != null) {
-    progressTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) async {
+  if (totalDuration != null && onProgress != null && controller != null) {
+    final totalMs = totalDuration.inMilliseconds.toDouble();
+
+    progressTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) async {
+      // Stop if cancelled
+      if (controller._cancelled) {
+        timer.cancel();
+        return;
+      }
+
       try {
+        final state = await session.getState();
+
+        // Check if session is still running
+        if (state.toString() == 'SessionState.completed' ||
+            state.toString() == 'SessionState.failed') {
+          timer.cancel();
+          onProgress(1.0);
+          return;
+        }
+
+        // Try to get statistics
         final statistics = await session.getAllStatistics();
         if (statistics.isNotEmpty) {
           final lastStat = statistics.last;
           final time = lastStat.getTime();
-          if (time > 0) {
+          if (time > 0 && totalMs > 0) {
             final currentMs = time.toDouble();
-            final totalMs = totalDuration!.inMilliseconds.toDouble();
-            final progress = (currentMs / totalMs).clamp(0.0, 1.0);
-            onProgress(progress);
+            final progressValue = (currentMs / totalMs).clamp(0.0, 0.99);
+            onProgress(progressValue);
           }
         }
       } catch (e) {
-        // Ignore errors during progress polling
+        // Ignore polling errors
       }
     });
   }
 
-  // Wait for the session to complete
+  // Wait for completion
   final returnCode = await session.getReturnCode();
 
   // Stop progress polling
@@ -101,6 +122,13 @@ Future<bool> convertMedia({
 
   // Check if successful
   final success = ReturnCode.isSuccess(returnCode);
+
+  // Log failure reason if not successful
+  if (!success) {
+    final output = await session.getOutput();
+    print("FFmpeg conversion failed. Return code: $returnCode");
+    print("Output: $output");
+  }
 
   return success;
 }
@@ -133,19 +161,35 @@ bool _isVideoFile(String path) {
 
 String _buildVideoCommand(String input, String output, String quality) {
   final crf = _getCRF(quality);
-  return '-i "$input" -c:v libx264 -crf $crf -preset ultrafast -c:a copy "$output"';
+  return '-i "$input" -c:v libx264 -crf $crf -preset ultrafast -c:a aac "$output" -y';
 }
 
 String _buildVideoToAudioCommand(String input, String output, String quality, String format) {
-  final qscale = _getAudioQScale(quality);
+  final bitrate = _getAudioBitrate(quality);
   final codec = _getAudioCodec(format);
-  return '-i "$input" -vn -c:a $codec -qscale:a $qscale "$output"';
+
+  if (codec == 'pcm_s16le') {
+    // WAV doesn't use bitrate
+    return '-i "$input" -vn -c:a $codec "$output" -y';
+  } else if (codec == 'flac') {
+    // FLAC uses compression level instead of bitrate
+    return '-i "$input" -vn -c:a $codec -compression_level 5 "$output" -y';
+  } else {
+    return '-i "$input" -vn -c:a $codec -b:a $bitrate "$output" -y';
+  }
 }
 
 String _buildAudioCommand(String input, String output, String quality, String format) {
-  final qscale = _getAudioQScale(quality);
+  final bitrate = _getAudioBitrate(quality);
   final codec = _getAudioCodec(format);
-  return '-i "$input" -c:a $codec -qscale:a $qscale "$output"';
+
+  if (codec == 'pcm_s16le') {
+    return '-i "$input" -c:a $codec "$output" -y';
+  } else if (codec == 'flac') {
+    return '-i "$input" -c:a $codec -compression_level 5 "$output" -y';
+  } else {
+    return '-i "$input" -c:a $codec -b:a $bitrate "$output" -y';
+  }
 }
 
 String _getAudioCodec(String format) {
@@ -163,6 +207,19 @@ String _getAudioCodec(String format) {
   }
 }
 
+String _getAudioBitrate(String quality) {
+  switch (quality.toLowerCase()) {
+    case 'low':
+      return '96k';
+    case 'medium':
+      return '192k';
+    case 'high':
+      return '320k';
+    default:
+      return '192k';
+  }
+}
+
 int _getCRF(String quality) {
   switch (quality.toLowerCase()) {
     case 'low':
@@ -173,18 +230,5 @@ int _getCRF(String quality) {
       return 20;
     default:
       return 28;
-  }
-}
-
-int _getAudioQScale(String quality) {
-  switch (quality.toLowerCase()) {
-    case 'low':
-      return 7;
-    case 'medium':
-      return 5;
-    case 'high':
-      return 2;
-    default:
-      return 5;
   }
 }
