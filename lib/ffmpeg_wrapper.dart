@@ -62,12 +62,7 @@ Future<bool> convertMedia({
   }
 
   // Start the conversion asynchronously
-  final session = await FFmpegKit.executeAsync(
-    cmd,
-    executeCallback: (session) async {
-      // This is called when the session completes
-    },
-  );
+  final session = await FFmpegKit.executeAsync(cmd);
 
   controller?._session = session;
 
@@ -82,7 +77,7 @@ Future<bool> convertMedia({
           final time = lastStat.getTime();
           if (time > 0) {
             final currentMs = time.toDouble();
-            final totalMs = totalDuration.inMilliseconds.toDouble();
+            final totalMs = totalDuration!.inMilliseconds.toDouble();
             final progress = (currentMs / totalMs).clamp(0.0, 1.0);
             onProgress(progress);
           }
