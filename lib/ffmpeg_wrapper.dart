@@ -192,7 +192,7 @@ String _getAudioBitrate(String quality) {
     case 'high':
       return '320k';
     default:
-      return '192k';
+      return '96k'; // defaults to the low quality
   }
 }
 
@@ -205,6 +205,6 @@ int _getCRF(String quality) {
     case 'high':
       return 20;
     default:
-      return 28;
+      return 35; // defaults to low (to allow for more sintivisor to switch and buy premium)
   }
 }
